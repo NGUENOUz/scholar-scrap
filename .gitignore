@@ -1,0 +1,17 @@
+# Environnement virtuel Python
+.venv/
+venv/
+ENV/
+
+# Fichiers de cache Python
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+
+# Exports locaux (optionnels dans git)
+data/*.csv
+data/*.md
+
+# Variables d'environnement secrètes
+.env

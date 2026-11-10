@@ -1,0 +1,53 @@
+sources:
+  - name: "greatyop"
+    enabled: true
+    url: "https://greatyop.com/category/bourses/"
+    max_pages: 2
+    page_url_pattern: "https://greatyop.com/category/bourses/page/{page}/"
+    article_selector: "article"
+    title_selector: "h2.entry-title a, h2 a, h3 a"
+    link_selector: "h2.entry-title a, h2 a, a[rel='bookmark']"
+    snippet_selector: ".entry-summary, .entry-content, p"
+    deadline_selector: ".deadline, .entry-meta, .time-left, .badge"
+
+  - name: "scholarships365"
+    enabled: true
+    url: "https://scholarships365.info/"
+    max_pages: 2
+    page_url_pattern: "https://scholarships365.info/page/{page}/"
+    article_selector: "article"
+    title_selector: "h2 a, h3 a"
+    link_selector: "h2 a, h3 a"
+    snippet_selector: ".entry-summary, p"
+    deadline_selector: ".deadline, .date"
+
+  - name: "scholarshipscorner"
+    enabled: true
+    url: "https://scholarshipscorner.website/"
+    max_pages: 1
+    page_url_pattern: "https://scholarshipscorner.website/page/{page}/"
+    article_selector: "article"
+    title_selector: "h2 a, h3 a, h4 a, .entry-title a, a[rel='bookmark']"
+    link_selector: "h2 a, h3 a, h4 a, .entry-title a, a[rel='bookmark']"
+    snippet_selector: ".entry-summary, p"
+    deadline_selector: ".deadline, .date"
+
+  - name: "maboursedetudes"
+    enabled: true
+    url: "https://www.maboursedetudes.com/"
+    sitemap_url: "https://www.maboursedetudes.com/sitemap.xml"
+    sitemap_filter: "/scholarships/"
+    detail_title_selector: "h1"
+    detail_snippet_selector: ".scholarship-description p, .description p, article p, p"
+    detail_deadline_selector: ".deadline, .date-limite, .closing-date, [class*='deadline'], [class*='date']"
+
+  - name: "mastere_tn"
+    enabled: true
+    url: "https://www.mastere.tn/bourses/"
+    max_pages: 1
+    page_url_pattern: "https://www.mastere.tn/bourses/page/{page}/"
+    article_selector: "article, div.post"
+    title_selector: "h2 a, h3 a"
+    link_selector: "h2 a, h3 a"
+    snippet_selector: "p"
+    deadline_selector: ".deadline"

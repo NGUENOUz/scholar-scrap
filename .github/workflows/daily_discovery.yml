@@ -1,0 +1,83 @@
+name: Découverte Quotidienne des Bourses
+
+on:
+  schedule:
+    # Exécution automatique tous les jours à 07h00 UTC (8h00 heure de Paris / Afrique de l'Ouest)
+    - cron: '0 7 * * *'
+  # Permet également de lancer le workflow manuellement depuis l'interface GitHub
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  run-discovery:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 📥 Cloner le dépôt
+        uses: actions/checkout@v4
+
+      - name: 🐍 Configurer Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: 📦 Mettre en cache le navigateur Playwright/Chromium
+        uses: actions/cache@v4
+        id: playwright-cache
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ runner.os }}-playwright-${{ hashFiles('requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-playwright-
+
+      - name: 🛠️ Installer les dépendances Python
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: 🌐 Installer Chromium (si non mis en cache)
+        if: steps.playwright-cache.outputs.cache-hit != 'true'
+        run: |
+          python -m playwright install --with-deps chromium
+
+      - name: 🚀 Lancer le service de découverte
+        env:
+          EMAIL_NOTIFICATIONS_ENABLED: ${{ secrets.EMAIL_NOTIFICATIONS_ENABLED || 'false' }}
+          SMTP_HOST: ${{ secrets.SMTP_HOST || 'smtp.gmail.com' }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT || '587' }}
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+          ALERT_EMAIL_RECIPIENT: ${{ secrets.ALERT_EMAIL_RECIPIENT }}
+          PLATFORM_SITEMAP_URL: ${{ secrets.PLATFORM_SITEMAP_URL || 'https://drenolearn.com/sitemap.xml' }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL || 'https://mlztlexcgdhgnnmkuioc.supabase.co' }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          SCRAPE_DELAY_SECONDS: 2.0
+        run: |
+          python -m src.main run
+
+      - name: 📄 Publier le rapport du jour dans GitHub Summary
+        if: always()
+        run: |
+          TODAY=$(date +'%Y-%m-%d')
+          MD_REPORT="data/candidates_${TODAY}.md"
+          if [ -f "$MD_REPORT" ]; then
+            cat "$MD_REPORT" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "### ℹ️ Aucun nouveau candidat détecté aujourd'hui." >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: 💾 Sauvegarder la base de données et les exports
+        if: always()
+        run: |
+          git config --global user.name "Scholarship Bot"
+          git config --global user.email "bot@drenolearn.com"
+          git add data/scholarships.db data/*.csv data/*.md || true
+          if git diff --staged --quiet; then
+            echo "Aucun changement à sauvegarder."
+          else
+            git commit -m "chore(data): mise à jour bourses découvertes [skip ci]"
+            git push
+          fi
