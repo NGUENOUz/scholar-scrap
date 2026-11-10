@@ -134,12 +134,14 @@ pytest -v
 Le workflow `.github/workflows/daily_discovery.yml` est déjà configuré :
 1. Crée un dépôt GitHub (privé de préférence) et pousse ton code.
 2. Va dans l'onglet **Settings > Secrets and variables > Actions** de ton dépôt GitHub.
-3. Ajoute les secrets suivants :
+3. Ajoute `SUPABASE_SERVICE_ROLE_KEY` pour que les nouvelles bourses soient créées en brouillon dans DrenoLearn.
+4. Ajoute `GEMINI_API_KEY` pour activer l'enrichissement des bourses avec Gemini.
+5. Pour recevoir les alertes par e-mail, ajoute les secrets suivants :
    - `EMAIL_NOTIFICATIONS_ENABLED` : `true`
    - `SMTP_HOST` : `smtp.gmail.com`
    - `SMTP_PORT` : `587`
    - `SMTP_USER` : ton adresse Gmail
    - `SMTP_PASSWORD` : ton mot de passe d'application Google
    - `ALERT_EMAIL_RECIPIENT` : l'adresse de réception
-4. Le robot tournera désormais **automatiquement tous les matins à 07h00 UTC**.
-5. Tu pourras aussi le déclencher à la demande depuis l'onglet **Actions > Découverte Quotidienne des Bourses > Run workflow**.
+6. Après fusion du workflow dans la branche par défaut, le robot tournera **automatiquement tous les jours à 07h00 UTC**.
+7. Tu pourras aussi le déclencher à la demande depuis l'onglet **Actions > Découverte Quotidienne des Bourses > Run workflow**.
