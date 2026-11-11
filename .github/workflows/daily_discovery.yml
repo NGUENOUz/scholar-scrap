@@ -54,6 +54,7 @@ jobs:
           PLATFORM_SITEMAP_URL: ${{ secrets.PLATFORM_SITEMAP_URL || 'https://drenolearn.com/sitemap.xml' }}
           SUPABASE_URL: ${{ secrets.SUPABASE_URL || 'https://mlztlexcgdhgnnmkuioc.supabase.co' }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           SCRAPE_DELAY_SECONDS: 2.0
         run: |
           python -m src.main run
