@@ -6,6 +6,7 @@ Gère la lecture de la configuration YAML et l'extraction des bourses candidates
 """
 
 import re
+import json
 import logging
 from datetime import datetime
 from pathlib import Path
@@ -65,12 +66,15 @@ ENGLISH_MONTHS = {
 def parse_date_safely(date_text: str) -> Optional[datetime]:
     """
     Tente de convertir une chaîne de date (FR ou EN) en objet datetime.
+    Supporte les ordinaux (1er, 1st, 2nd, etc.) et les formats variés.
     Retourne None si la date n'est pas analysable avec certitude.
     """
     if not date_text:
         return None
 
     clean = date_text.strip().lower()
+    # Nettoyer les ordinaux : 1er -> 1, 31st -> 31, etc.
+    clean = re.sub(r"\b(\d+)(?:er|ère|ere|st|nd|rd|th)\b", r"\1", clean)
 
     # Formats numériques directs : DD/MM/YYYY, YYYY-MM-DD
     for fmt in ("%d/%m/%Y", "%d-%m-%Y", "%Y-%m-%d", "%Y/%m/%d"):
@@ -81,8 +85,8 @@ def parse_date_safely(date_text: str) -> Optional[datetime]:
             except ValueError:
                 pass
 
-    # Format textuel : DD Mois YYYY (ex: 15 juin 2026 ou June 15, 2026)
-    m_fr = re.search(r"(\d{1,2})\s+([a-zéèêûô]+)\s+(\d{4})", clean)
+    # Format textuel FR : DD Mois YYYY (ex: 15 juin 2026 ou 1 juin 2026)
+    m_fr = re.search(r"\b(\d{1,2})\s+([a-zéèêûô]+)\s+(\d{4})\b", clean)
     if m_fr:
         day = int(m_fr.group(1))
         month_str = m_fr.group(2)
@@ -95,7 +99,7 @@ def parse_date_safely(date_text: str) -> Optional[datetime]:
                 pass
 
     # Format textuel EN : Mois DD, YYYY (ex: May 15, 2026)
-    m_en = re.search(r"([a-z]+)\s+(\d{1,2}),?\s+(\d{4})", clean)
+    m_en = re.search(r"\b([a-z]+)\s+(\d{1,2}),?\s+(\d{4})\b", clean)
     if m_en:
         month_str = m_en.group(1)
         day = int(m_en.group(2))
@@ -104,6 +108,19 @@ def parse_date_safely(date_text: str) -> Optional[datetime]:
         if month and 1 <= day <= 31:
             try:
                 return datetime(year, month, day)
+            except ValueError:
+                pass
+
+    # Format textuel : Mois YYYY (ex: juin 2026 / June 2026) -> Dernier jour du mois ou 28
+    m_month_year = re.search(r"\b([a-zéèêûô]+)\s+(\d{4})\b", clean)
+    if m_month_year:
+        month_str = m_month_year.group(1)
+        year = int(m_month_year.group(2))
+        month = FRENCH_MONTHS.get(month_str) or ENGLISH_MONTHS.get(month_str)
+        if month:
+            # On prend par défaut le 28 du mois pour rester prudent
+            try:
+                return datetime(year, month, 28)
             except ValueError:
                 pass
 
@@ -143,28 +160,45 @@ def is_deadline_expired(deadline_text: Optional[str]) -> bool:
 def extract_deadline(text: str) -> Optional[str]:
     """
     Extrait une date limite si elle est clairement formulée dans le texte ou un badge.
-    Exemples: 'Date limite : 15 mai 2026', 'Deadline: May 30, 2026', '90 Jours restant', etc.
+    Exemples: 'Date limite : 15 mai 2026', 'Deadline: May 30, 2026', 'Candidater avant le 1er juin 2026',
+    '90 Jours restant', 'Jusqu'au 30/04/2026', etc.
     Ne rien inventer : si non trouvé, retourne None.
     """
     if not text:
         return None
 
-    # Motif "X jours restants"
+    # Motif 1 : "X jours restants"
     match_days = re.search(r"(\d+\s*jours?\s*restants?)", text, re.IGNORECASE)
     if match_days:
         return match_days.group(1).strip()
 
-    # Motif "Date limite : ..." ou "Deadline : ..."
-    match_deadline = re.search(
-        r"(?:date limite|deadline|closing date|date de clôture|clôture le)\s*[:\-]?\s*([0-9a-zA-Z\s,]{4,25})",
-        text,
+    # Motif 2 : Formulations avec mot-clé explicite
+    deadline_pattern = re.compile(
+        r"(?:date\s+limite(?:\s+de\s+(?:candidature|dépôt|soumission))?|"
+        r"date\s+de\s+clôture|clôture(?:\s+des\s+candidatures)?(?:\s+le)?|"
+        r"fin\s+des\s+candidatures|limite\s+de\s+dépôt|"
+        r"candidater\s+avant\s+le|postuler\s+avant\s+le|au\s+plus\s+tard\s+le|avant\s+le|jusqu['’]au|"
+        r"application\s+deadline|closing\s+date|closing\s+on|closes\s+on|apply\s+before|apply\s+by|"
+        r"deadline(?:\s+is)?)\s*[:\-]?\s*([0-9a-zA-ZÀ-ÿ\s,./–-]{4,35})",
         re.IGNORECASE
     )
+    match_deadline = deadline_pattern.search(text)
     if match_deadline:
         candidate_date = match_deadline.group(1).strip()
-        # Ne garder que si la date a un contenu raisonnable
+        # Nettoyer d'éventuels retours à la ligne ou fins de phrase
+        candidate_date = re.split(r"[\n\r;.]", candidate_date)[0].strip(" ,-–:")
+        # Ne garder que si la date a un contenu raisonnable et comporte au moins un chiffre
         if len(candidate_date) >= 4 and any(char.isdigit() for char in candidate_date):
             return candidate_date
+
+    # Motif 3 : Recherche directe de "jusqu'au DD Mois YYYY" ou "avant le DD/MM/YYYY"
+    direct_pattern = re.compile(
+        r"(?:avant\s+le|jusqu['’]au|au\s+plus\s+tard\s+le)\s+(\d{1,2}(?:er)?\s+[a-zA-ZÀ-ÿ]+\s+\d{4})",
+        re.IGNORECASE
+    )
+    m_direct = direct_pattern.search(text)
+    if m_direct:
+        return m_direct.group(1).strip()
 
     return None
 
@@ -173,7 +207,12 @@ class SourceManager:
     """Gestionnaire de sources basé sur config/sources.yaml."""
 
     def __init__(self, config_path: str = "config/sources.yaml"):
-        self.config_path = Path(config_path)
+        p = Path(config_path)
+        if not p.exists():
+            fallback = Path(__file__).resolve().parent.parent / config_path
+            if fallback.exists():
+                p = fallback
+        self.config_path = p
         self.sources = self._load_config()
 
     def _load_config(self) -> list:
@@ -189,6 +228,48 @@ class SourceManager:
             if src.get("name") == name:
                 return src
         return None
+
+    @staticmethod
+    def _extract_labeled_value(soup, label: str) -> Optional[str]:
+        """
+        Récupère la valeur associée à un libellé, par exemple :
+        <dt>Date limite</dt><dd>15/11/2026</dd>.
+        Utile pour les sources dont les dates ne sont pas dans une classe CSS dédiée.
+        """
+        label_lower = label.strip().lower()
+        for tag in soup.find_all(["dt", "th", "span", "div", "strong", "p", "label"]):
+            if tag.get_text(" ", strip=True).lower() != label_lower:
+                continue
+            sibling = tag.find_next_sibling()
+            if sibling is None:
+                continue
+            value = " ".join(sibling.get_text(" ", strip=True).split())
+            if value:
+                return value
+        return None
+
+    @staticmethod
+    def _extract_jsonld_description(soup) -> str:
+        """
+        Récupère la description JSON-LD "Article" d'une page de détail.
+        Elle contient souvent les critères structurés (niveau, âge, date limite...)
+        absents du HTML visible : matière première idéale pour l'enrichissement IA.
+        """
+        for script in soup.find_all("script", type="application/ld+json"):
+            raw = script.string or script.get_text()
+            if not raw or '"Article"' not in raw:
+                continue
+            try:
+                data = json.loads(raw)
+            except (json.JSONDecodeError, TypeError):
+                continue
+            description = data.get("description") if isinstance(data, dict) else None
+            if isinstance(description, str) and description.strip():
+                # On conserve les retours à la ligne : ils séparent les critères structurés
+                # (« - Niveau : ... », « - Date limite : ... ») exploitables par l'IA.
+                lines = [" ".join(line.split()) for line in description.splitlines()]
+                return "\n".join(line for line in lines if line)
+        return ""
 
     def extract_from_html(self, source_config: dict, html: str, page_url: str) -> List[ScholarshipCandidate]:
         """
@@ -276,14 +357,33 @@ class SourceManager:
             logger.error("Source inconnue : %s", source_name)
             return []
 
-        # Cas 1 : Source configurée via Sitemap XML (ex: maboursedetudes.com)
+        # Cas 1 : Source configurée via Sitemap XML (ex: maboursedetudes.com, youthmedia)
         sitemap_url = src_cfg.get("sitemap_url")
         if sitemap_url:
             logger.info("[%s] Découverte via sitemap : %s", source_name, sitemap_url)
             try:
                 import requests
-                resp = requests.get(sitemap_url, headers={"User-Agent": "Mozilla/5.0"}, timeout=15)
-                if resp.status_code == 200:
+                # URLs alternatives si échec de résolution (avec et sans www)
+                urls_to_try = [sitemap_url]
+                if "://www." in sitemap_url:
+                    urls_to_try.append(sitemap_url.replace("://www.", "://"))
+                elif "://" in sitemap_url:
+                    urls_to_try.append(sitemap_url.replace("://", "://www."))
+
+                resp = None
+                for u in urls_to_try:
+                    try:
+                        resp = requests.get(
+                            u,
+                            headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"},
+                            timeout=20
+                        )
+                        if resp.status_code == 200:
+                            break
+                    except Exception as err:
+                        logger.warning("[%s] Échec sur %s (%s). Essai alternative...", source_name, u, err)
+
+                if resp and resp.status_code == 200:
                     soup_xml = BeautifulSoup(resp.text, "xml")
                     filter_str = src_cfg.get("sitemap_filter", "")
                     sitemap_urls = []
@@ -293,7 +393,12 @@ class SourceManager:
                             continue
                         sitemap_urls.append(url_item)
 
-                    logger.info("[%s] %d URLs candidates extraites du sitemap.", source_name, len(sitemap_urls))
+                    max_items = src_cfg.get("max_items", 30)
+                    if len(sitemap_urls) > max_items:
+                        # Priorité aux URLs les plus récentes (généralement en tête ou queue)
+                        sitemap_urls = sitemap_urls[:max_items]
+
+                    logger.info("[%s] %d URLs candidates retenues du sitemap.", source_name, len(sitemap_urls))
 
                     # Visiter chaque page de détail pour extraire le vrai contenu
                     sitemap_candidates = []
@@ -320,31 +425,51 @@ class SourceManager:
                             for sel in detail_snippet_selector.split(","):
                                 snippet_elem = detail_soup.select_one(sel.strip())
                                 if snippet_elem:
-                                    raw = " ".join(snippet_elem.get_text(strip=True).split())
+                                    raw = " ".join(snippet_elem.get_text(" ", strip=True).split())
                                     sentences = re.split(r"(?<=[.!?])\s+", raw)
                                     snippet = " ".join(sentences[:3])
                                     if snippet:
                                         break
 
+                            # Détails structurés (JSON-LD) pour l'enrichissement IA
+                            source_details = ""
+                            if src_cfg.get("use_jsonld_description"):
+                                source_details = self._extract_jsonld_description(detail_soup)
+
                             # Date limite réelle
                             deadline = None
-                            if detail_deadline_selector:
+                            detail_deadline_label = src_cfg.get("detail_deadline_label")
+                            if detail_deadline_label:
+                                labeled_value = self._extract_labeled_value(detail_soup, detail_deadline_label)
+                                if labeled_value:
+                                    deadline = (
+                                        labeled_value
+                                        if parse_date_safely(labeled_value)
+                                        else extract_deadline(labeled_value)
+                                    )
+                            if not deadline and detail_deadline_selector:
                                 dl_elem = detail_soup.select_one(detail_deadline_selector)
                                 if dl_elem:
                                     deadline = extract_deadline(dl_elem.get_text(strip=True))
+
+                            if not deadline and source_details:
+                                # La description structurée mentionne souvent la date limite
+                                deadline = extract_deadline(source_details)
+
                             if not deadline:
                                 # Chercher dans tout le texte de la page
                                 full_text = detail_soup.get_text(" ", strip=True)
                                 deadline = extract_deadline(full_text)
 
                             logger.info(
-                                "[%s] Détail récupéré pour '%s' | deadline=%s | snippet=%d car.",
-                                source_name, title, deadline or "N/A", len(snippet)
+                                "[%s] Détail récupéré pour '%s' | deadline=%s | snippet=%d car. | détails=%d car.",
+                                source_name, title, deadline or "N/A", len(snippet), len(source_details)
                             )
                         else:
                             logger.warning("[%s] Impossible de récupérer la page de détail : %s", source_name, url_item)
                             title = fallback_title
                             snippet = f"Bourse identifiée dans le catalogue {source_name}."
+                            source_details = ""
                             deadline = None
 
                         c = ScholarshipCandidate(
@@ -353,6 +478,7 @@ class SourceManager:
                             source_site=source_name,
                             discovery_url=sitemap_url,
                             snippet=snippet,
+                            source_details=source_details,
                             deadline=deadline,
                             domain_type=detect_domain_type(url_item),
                             status="nouveau"

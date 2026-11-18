@@ -13,5 +13,8 @@ __pycache__/
 data/*.csv
 data/*.md
 
+# Cache runtime des liens officiels trouvés par recherche web
+data/official_links_cache.json
+
 # Variables d'environnement secrètes
 .env

@@ -3,7 +3,25 @@
 import json
 from types import SimpleNamespace
 
+from src import ai_enricher
 from src.ai_enricher import AIEnricher
+
+
+def test_client_uses_bounded_timeout_and_disables_retries(monkeypatch):
+    captured = {}
+
+    def fake_client(**kwargs):
+        captured.update(kwargs)
+        return SimpleNamespace()
+
+    monkeypatch.setenv("GEMINI_API_KEY", "test-key")
+    monkeypatch.setattr(ai_enricher.genai, "Client", fake_client)
+
+    AIEnricher()
+
+    options = captured["http_options"]
+    assert options.timeout == ai_enricher.GEMINI_TIMEOUT_MS
+    assert options.retry_options.attempts == 1
 
 
 def test_enrich_uses_official_page_context_without_inventing_details():

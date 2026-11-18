@@ -20,6 +20,10 @@ class ScholarshipCandidate(BaseModel):
         description="Date et heure de détection"
     )
     snippet: str = Field("", description="Extrait court tiré de la page (1 à 3 phrases)")
+    source_details: str = Field(
+        "",
+        description="Détails structurés de la page source (critères, niveau, âge...) pour l'enrichissement IA"
+    )
     deadline: Optional[str] = Field(None, description="Date limite si détectable clairement, sinon vide")
     domain_type: str = Field(
         "Autre",

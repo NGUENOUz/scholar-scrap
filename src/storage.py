@@ -8,7 +8,7 @@ Garantit qu'une bourse déjà signalée ne sera jamais renvoyée une seconde foi
 import sqlite3
 import logging
 from pathlib import Path
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 from src.models import ScholarshipCandidate
 from src.dedup import normalize_url, clean_title, are_titles_similar
@@ -57,6 +57,28 @@ class Storage:
             """)
             cursor.execute("""
                 CREATE INDEX IF NOT EXISTS idx_status ON candidates(status);
+            """)
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS social_posts (
+                    scholarship_id TEXT PRIMARY KEY,
+                    title TEXT NOT NULL,
+                    slug TEXT NOT NULL,
+                    template_type TEXT NOT NULL,
+                    deadline TEXT,
+                    study_levels TEXT NOT NULL,
+                    canva_description TEXT NOT NULL,
+                    image_suggestion TEXT NOT NULL,
+                    social_text TEXT NOT NULL,
+                    public_url TEXT NOT NULL,
+                    buffer_status TEXT NOT NULL DEFAULT 'pending',
+                    buffer_idea_id TEXT,
+                    buffer_error TEXT,
+                    buffer_attempted_at TEXT,
+                    buffer_idea_created_at TEXT,
+                    canva_exported_at TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                );
             """)
             conn.commit()
 
@@ -146,3 +168,109 @@ class Storage:
                 )
                 candidates.append(c)
             return candidates
+
+    def get_social_post(self, scholarship_id: str) -> Optional[Dict[str, Any]]:
+        with self._get_connection() as conn:
+            row = conn.execute(
+                "SELECT * FROM social_posts WHERE scholarship_id = ?",
+                (scholarship_id,)
+            ).fetchone()
+            return dict(row) if row else None
+
+    def save_social_post(self, post: Dict[str, Any]) -> bool:
+        with self._get_connection() as conn:
+            cursor = conn.execute("""
+                INSERT OR IGNORE INTO social_posts (
+                    scholarship_id, title, slug, template_type, deadline, study_levels,
+                    canva_description, image_suggestion, social_text, public_url,
+                    buffer_status
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')
+            """, (
+                post["scholarship_id"], post["title"], post["slug"], post["template_type"],
+                post["deadline"], post["study_levels"], post["canva_description"],
+                post["image_suggestion"], post["social_text"], post["public_url"]
+            ))
+            return cursor.rowcount == 1
+
+    def get_social_posts_pending_buffer(self, limit: int) -> List[Dict[str, Any]]:
+        with self._get_connection() as conn:
+            rows = conn.execute("""
+                SELECT * FROM social_posts
+                WHERE buffer_status = 'pending'
+                ORDER BY created_at, scholarship_id
+                LIMIT ?
+            """, (limit,)).fetchall()
+            return [dict(row) for row in rows]
+
+    def mark_buffer_idea_creating(self, scholarship_id: str, attempted_at: str) -> bool:
+        with self._get_connection() as conn:
+            cursor = conn.execute("""
+                UPDATE social_posts
+                SET buffer_status = 'creating', buffer_error = NULL, buffer_attempted_at = ?,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE scholarship_id = ? AND buffer_status = 'pending'
+            """, (attempted_at, scholarship_id))
+            return cursor.rowcount == 1
+
+    def mark_buffer_idea_created(self, scholarship_id: str, idea_id: str, created_at: str) -> None:
+        with self._get_connection() as conn:
+            conn.execute("""
+                UPDATE social_posts
+                SET buffer_status = 'created', buffer_idea_id = ?, buffer_idea_created_at = ?,
+                    buffer_error = NULL, updated_at = CURRENT_TIMESTAMP
+                WHERE scholarship_id = ?
+            """, (idea_id, created_at, scholarship_id))
+
+    def mark_buffer_idea_failed(self, scholarship_id: str, error: str, uncertain: bool = False) -> None:
+        status = "uncertain" if uncertain else "pending"
+        with self._get_connection() as conn:
+            conn.execute("""
+                UPDATE social_posts
+                SET buffer_status = ?, buffer_error = ?, updated_at = CURRENT_TIMESTAMP
+                WHERE scholarship_id = ?
+            """, (status, error, scholarship_id))
+
+    def get_social_posts_pending_csv(self, limit: int) -> List[Dict[str, Any]]:
+        with self._get_connection() as conn:
+            rows = conn.execute("""
+                SELECT * FROM social_posts
+                WHERE canva_exported_at IS NULL AND buffer_status = 'created'
+                ORDER BY created_at, scholarship_id
+                LIMIT ?
+            """, (limit,)).fetchall()
+            return [dict(row) for row in rows]
+
+    def count_social_posts_pending_csv(self) -> int:
+        with self._get_connection() as conn:
+            row = conn.execute("""
+                SELECT COUNT(*) AS count FROM social_posts
+                WHERE canva_exported_at IS NULL
+            """).fetchone()
+            return int(row["count"])
+
+    def mark_social_posts_csv_exported(self, scholarship_ids: List[str], exported_at: str) -> None:
+        with self._get_connection() as conn:
+            conn.executemany("""
+                UPDATE social_posts
+                SET canva_exported_at = ?, updated_at = CURRENT_TIMESTAMP
+                WHERE scholarship_id = ?
+            """, [(exported_at, scholarship_id) for scholarship_id in scholarship_ids])
+
+    def get_social_posts_buffer_review(self) -> List[Dict[str, Any]]:
+        with self._get_connection() as conn:
+            rows = conn.execute("""
+                SELECT scholarship_id, title, buffer_status, buffer_error
+                FROM social_posts
+                WHERE buffer_status IN ('creating', 'uncertain')
+                ORDER BY created_at
+            """).fetchall()
+            return [dict(row) for row in rows]
+
+    def reset_social_buffer_for_retry(self, scholarship_id: str) -> bool:
+        with self._get_connection() as conn:
+            cursor = conn.execute("""
+                UPDATE social_posts
+                SET buffer_status = 'pending', buffer_error = NULL, updated_at = CURRENT_TIMESTAMP
+                WHERE scholarship_id = ? AND buffer_status IN ('creating', 'uncertain')
+            """, (scholarship_id,))
+            return cursor.rowcount == 1

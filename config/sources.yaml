@@ -51,3 +51,17 @@ sources:
     link_selector: "h2 a, h3 a"
     snippet_selector: "p"
     deadline_selector: ".deadline"
+
+  - name: "youthmedia"
+    enabled: true
+    url: "https://www.youthmedia.net/bourses"
+    sitemap_url: "https://www.youthmedia.net/sitemap.xml"
+    sitemap_filter: "/bourses/"
+    max_items: 25
+    detail_title_selector: "h1"
+    detail_snippet_selector: ".prose .text-gray-700, .prose p, p"
+    detail_deadline_selector: "dl > div:first-child dd"
+    detail_deadline_label: "Date limite"
+    # La description JSON-LD contient les critères structurés (niveau, âge, date limite...)
+    # qui servent de contexte à l'enrichissement IA.
+    use_jsonld_description: true

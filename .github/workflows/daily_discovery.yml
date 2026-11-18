@@ -13,10 +13,13 @@ permissions:
 jobs:
   run-discovery:
     runs-on: ubuntu-latest
+    timeout-minutes: 60
 
     steps:
       - name: 📥 Cloner le dépôt
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: 🐍 Configurer Python 3.11
         uses: actions/setup-python@v5
@@ -24,22 +27,12 @@ jobs:
           python-version: "3.11"
           cache: "pip"
 
-      - name: 📦 Mettre en cache le navigateur Playwright/Chromium
-        uses: actions/cache@v4
-        id: playwright-cache
-        with:
-          path: ~/.cache/ms-playwright
-          key: ${{ runner.os }}-playwright-${{ hashFiles('requirements.txt') }}
-          restore-keys: |
-            ${{ runner.os }}-playwright-
-
       - name: 🛠️ Installer les dépendances Python
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: 🌐 Installer Chromium (si non mis en cache)
-        if: steps.playwright-cache.outputs.cache-hit != 'true'
+      - name: 🌐 Installer Chromium et dépendances système Playwright
         run: |
           python -m playwright install --with-deps chromium
 
@@ -55,6 +48,7 @@ jobs:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL || 'https://mlztlexcgdhgnnmkuioc.supabase.co' }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GEMINI_API_KEY2: ${{ secrets.GEMINI_API_KEY2 }}
           SCRAPE_DELAY_SECONDS: 2.0
         run: |
           python -m src.main run
@@ -70,15 +64,16 @@ jobs:
             echo "### ℹ️ Aucun nouveau candidat détecté aujourd'hui." >> $GITHUB_STEP_SUMMARY
           fi
 
-      - name: 💾 Sauvegarder la base de données et les exports
+      - name: 💾 Sauvegarder la base de données, la file d'attente et les exports
         if: always()
         run: |
-          git config --global user.name "Scholarship Bot"
-          git config --global user.email "bot@drenolearn.com"
-          git add data/scholarships.db data/*.csv data/*.md || true
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/scholarships.db data/*.csv data/*.md data/pending_enrichment.json data/official_links_cache.json 2>/dev/null || true
           if git diff --staged --quiet; then
             echo "Aucun changement à sauvegarder."
           else
-            git commit -m "chore(data): mise à jour bourses découvertes [skip ci]"
-            git push
+            git commit -m "chore(data): synchronisation automatique des bourses [skip ci]"
+            git pull --rebase origin main 2>/dev/null || true
+            git push origin main || echo "⚠️ Attention : Le push Git a échoué (vérifiez les permissions d'écriture de GitHub Actions)."
           fi
